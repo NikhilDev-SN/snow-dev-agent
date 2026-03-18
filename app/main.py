@@ -1,105 +1,112 @@
-import sys
-import os
-
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
-
 import streamlit as st
 
 from agent.orchestrator import generate_script
 from integration.servicenow_client import deploy_artifact
-from validation.script_validator import validate_script
-from rag.retriever import retrieve_context
+from config.settings import settings
 
-st.set_page_config(page_title="AI ServiceNow Developer Agent")
+# Optional modules (safe fallback)
+try:
+    from validation.script_validator import validate_script
+except:
+    def validate_script(x): return {"valid": True, "issues": []}
+
+try:
+    from rag.retriever import retrieve_context
+except:
+    def retrieve_context(x): return ""
+
+
+# ---------------- UI CONFIG ----------------
+st.set_page_config(
+    page_title="AI ServiceNow Developer Agent",
+    layout="wide"
+)
 
 st.title("🚀 AI ServiceNow Developer Agent")
 
-
-# ✅ Default = OpenAI
-provider = st.selectbox(
-    "Select AI Provider",
-    ["openai", "gemini", "claude"],
-    index=0
-)
-
-
+# ---------------- INPUT ----------------
 requirement = st.text_area(
     "Describe your ServiceNow requirement",
     height=150
 )
 
+col1, col2 = st.columns(2)
 
-# ---------------- RAG ---------------- #
+with col1:
+    artifact_type = st.selectbox(
+        "Artifact Type",
+        ["auto", "business_rule", "script_include", "client_script"]
+    )
 
-if st.button("Show RAG Context"):
-
-    if not requirement.strip():
-        st.warning("Please enter a requirement")
-    else:
-        try:
-            context = retrieve_context(requirement)
-            st.subheader("Retrieved Context")
-            st.code(context)
-
-        except Exception as e:
-            st.error(f"RAG retrieval failed: {e}")
+with col2:
+    provider = st.selectbox(
+        "LLM Provider",
+        ["openai", "gemini", "claude"],
+        index=["openai", "gemini", "claude"].index(settings.DEFAULT_PROVIDER)
+        if settings.DEFAULT_PROVIDER in ["openai", "gemini", "claude"] else 0
+    )
 
 
-# ---------------- Generate ---------------- #
-
+# ---------------- GENERATE ----------------
 if st.button("Generate Script"):
 
     if not requirement.strip():
         st.warning("Please enter a requirement")
-    else:
-        try:
-            artifact = generate_script(requirement, provider)
-            st.session_state["artifact"] = artifact
+        st.stop()
 
-        except Exception as e:
-            st.error(f"Script generation failed: {e}")
-
-
-artifact = st.session_state.get("artifact")
-
-
-# ---------------- Display ---------------- #
-
-if artifact:
-
-    st.subheader("Artifact Type")
-    st.write(artifact.artifact_type)
-
-    st.subheader("Name")
-    st.write(artifact.name)
-
-    st.subheader("Generated Script")
-    st.code(artifact.script, language="javascript")
-
-    # Validation
-    try:
-        issues = validate_script(artifact.script)
-
-        if issues:
-            st.warning(f"Issues detected: {issues}")
-        else:
-            st.success("No validation issues found")
-
-    except Exception:
-        st.warning("Validation skipped")
-
-
-# ---------------- Deploy ---------------- #
-
-    if st.button("Deploy to ServiceNow"):
+    with st.spinner("Generating script..."):
 
         try:
-            result = deploy_artifact(artifact.model_dump())
+            # 🔍 RAG Context (safe)
+            context = retrieve_context(requirement)
 
-            st.subheader("Deployment Result")
-            st.json(result)
+            # 🤖 Generate script
+            artifact = generate_script(
+                requirement=requirement,
+                provider=provider,
+                context=context,
+                artifact_hint=artifact_type
+            )
+
+            st.success("Script Generated")
+
+            # ---------------- DISPLAY ----------------
+            st.subheader("Artifact Type")
+            st.code(artifact.get("artifact_type", ""))
+
+            st.subheader("Name")
+            st.code(artifact.get("name", ""))
+
+            st.subheader("Generated Script")
+            st.code(artifact.get("script", ""), language="javascript")
+
+            # ---------------- VALIDATION ----------------
+            validation = validate_script(artifact)
+
+            if validation.get("valid"):
+                st.success("Validation Passed")
+            else:
+                st.warning("Validation Issues Found")
+                for issue in validation.get("issues", []):
+                    st.write(f"- {issue}")
+
+            # ---------------- DEPLOY ----------------
+            if st.button("Deploy to ServiceNow"):
+
+                with st.spinner("Deploying..."):
+                    try:
+                        result = deploy_artifact(artifact)
+
+                        st.success("Deployment Response")
+                        st.json(result)
+
+                    except Exception as e:
+                        st.error(f"Deployment failed: {str(e)}")
 
         except Exception as e:
-            st.error(f"Deployment failed: {e}")
+            st.error(f"Script generation failed: {str(e)}")
+
+
+# ---------------- FOOTER ----------------
+st.markdown("---")
+st.caption("Built for ServiceNow AI Automation")

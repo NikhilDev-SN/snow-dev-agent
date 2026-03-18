@@ -1,67 +1,68 @@
 import json
-from agent.prompts import build_prompt
-from agent.schema import Artifact
-from llm.provider_router import ModelRouter
-from rag.retriever import retrieve_context
 
-router = ModelRouter()
+from llm.provider_router import ModelRouter
+from agent.prompts import build_prompt
+from config.settings import settings
+
+
+router = ModelRouter(settings)
 
 
 def safe_json_parse(content: str):
     """
-    Extract JSON safely even if model returns extra text
+    Robust JSON parser for LLM responses
     """
 
     try:
         return json.loads(content)
+
     except:
-        pass
-
-    # Try extracting JSON block
-    try:
-        start = content.find("{")
-        end = content.rfind("}") + 1
-
-        if start != -1 and end != -1:
+        # 🔥 Handle cases where LLM wraps JSON in text
+        try:
+            start = content.find("{")
+            end = content.rfind("}") + 1
             return json.loads(content[start:end])
-
-    except:
-        pass
-
-    raise Exception("Failed to parse model output as JSON")
+        except:
+            raise Exception("Invalid JSON response from model")
 
 
-def generate_script(requirement: str, provider: str = "openai") -> Artifact:
+def generate_script(requirement, provider="openai", context="", artifact_hint="auto"):
     """
-    Main orchestration function
+    Main orchestration pipeline
     """
 
-    # ---------------- RAG ---------------- #
-    context = retrieve_context(requirement)
-
-    # ---------------- Prompt ---------------- #
+    # 🧠 Build prompt
     prompt = build_prompt(requirement, context)
+
+    if artifact_hint != "auto":
+        prompt += f"\n\nForce artifact type: {artifact_hint}"
 
     messages = [
         {"role": "system", "content": "You are a ServiceNow expert developer."},
         {"role": "user", "content": prompt},
     ]
 
-    # ---------------- LLM ---------------- #
-    content = router.generate(messages, provider)
+    # 🤖 Call LLM via router
+    response = router.generate(messages, provider)
 
-    # ---------------- Parse ---------------- #
-    data = safe_json_parse(content)
+    if not response or not response.strip():
+        raise Exception("Empty response from model")
 
-    # ---------------- Normalize ---------------- #
-    data.setdefault("artifact_type", "business_rule")
-    data.setdefault("name", "Generated Artifact")
-    data.setdefault("script", "")
+    # 🔍 Parse JSON safely
+    data = safe_json_parse(response)
 
-    # Optional fields (safe defaults)
-    data.setdefault("table", "incident")
-    data.setdefault("when", "before")
-    data.setdefault("insert", True)
-    data.setdefault("update", False)
+    # 🧪 Normalize fields (avoid missing keys issues)
+    artifact = {
+        "artifact_type": data.get("artifact_type", "business_rule"),
+        "name": data.get("name", "Generated Script"),
+        "table": data.get("table", "incident"),
+        "when": data.get("when", "before"),
+        "insert": data.get("insert", True),
+        "update": data.get("update", True),
+        "script": data.get("script", "")
+    }
 
-    return Artifact(**data)
+    if not artifact["script"]:
+        raise Exception("Generated script is empty")
+
+    return artifact
