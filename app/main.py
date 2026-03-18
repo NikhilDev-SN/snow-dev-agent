@@ -120,4 +120,4 @@ if st.button("Generate Script"):
 
 # ---------------- FOOTER ----------------
 st.markdown("---")
-st.caption("Built with ❤️ for ServiceNow AI Automation")
+st.caption("Built for ServiceNow AI Automation")
