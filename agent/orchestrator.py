@@ -1,68 +1,120 @@
-import json
-
 from llm.router import ModelRouter
-from agent.prompts import build_prompt
 from config.settings import settings
-
+import json
+import re
 
 router = ModelRouter(settings)
 
 
-def safe_json_parse(content: str):
+# ---------------- CLEAN RESPONSE ----------------
+def extract_json(text):
     """
-    Robust JSON parser for LLM responses
-    """
-
-    try:
-        return json.loads(content)
-
-    except:
-        # 🔥 Handle cases where LLM wraps JSON in text
-        try:
-            start = content.find("{")
-            end = content.rfind("}") + 1
-            return json.loads(content[start:end])
-        except:
-            raise Exception("Invalid JSON response from model")
-
-
-def generate_script(requirement, provider="openai", context="", artifact_hint="auto"):
-    """
-    Main orchestration pipeline
+    Extract JSON from LLM response (handles ```json blocks)
     """
 
-    # 🧠 Build prompt
-    prompt = build_prompt(requirement, context)
+    if not text:
+        return None
 
-    if artifact_hint != "auto":
-        prompt += f"\n\nForce artifact type: {artifact_hint}"
+    # 🔥 Remove markdown ```json ... ```
+    text = re.sub(r"```json\s*", "", text)
+    text = re.sub(r"```", "", text)
 
-    messages = [
-        {"role": "system", "content": "You are a ServiceNow expert developer."},
-        {"role": "user", "content": prompt},
-    ]
+    text = text.strip()
 
-    # 🤖 Call LLM via router
-    response = router.generate(messages, provider)
+    # 🔥 Extract JSON block
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if match:
+        return match.group(0)
 
-    if not response or not response.strip():
-        raise Exception("Empty response from model")
+    return text
 
-    # 🔍 Parse JSON safely
-    data = safe_json_parse(response)
 
-    # 🧪 Normalize fields (avoid missing keys issues)
-    artifact = {
-        "artifact_type": data.get("artifact_type", "business_rule"),
-        "name": data.get("name", "Generated Script"),
-        "table": data.get("table", "incident"),
-        "when": data.get("when", "before"),
-        "insert": data.get("insert", True),
-        "update": data.get("update", True),
-        "script": data.get("script", "")
+# ---------------- NORMALIZE TYPE ----------------
+def normalize_artifact_type(value):
+    if not value:
+        return "unknown"
+
+    value = value.lower().strip()
+
+    mapping = {
+        "script include": "script_include",
+        "script_include": "script_include",
+
+        "business rule": "business_rule",
+        "business_rule": "business_rule",
+
+        "client script": "client_script",
+        "client_script": "client_script",
     }
 
-    if not artifact["script"]:
-        raise Exception("Generated script is empty")
+    return mapping.get(value, "unknown")
 
-    return artifact
+
+# ---------------- MAIN FUNCTION ----------------
+def generate_script(requirement, provider="gemini", context="", artifact_hint="auto"):
+
+    messages = [
+        {
+            "role": "system",
+            "content": "You are a ServiceNow expert developer."
+        },
+        {
+            "role": "user",
+            "content": f"""
+Use the context below to generate a valid ServiceNow script.
+
+Context:
+{context}
+
+Requirement:
+{requirement}
+
+Instructions:
+- Identify correct artifact type
+- Generate production-ready script
+- Follow best practices
+- IMPORTANT: Do NOT wrap output in markdown
+- IMPORTANT: Return ONLY raw JSON
+
+Return artifact_type ONLY as:
+- business_rule
+- script_include
+- client_script
+
+Output STRICT JSON:
+{{
+  "artifact_type": "",
+  "name": "",
+  "script": ""
+}}
+"""
+        }
+    ]
+
+    response = router.generate(messages, provider=provider)
+
+    print("\n[RAW LLM RESPONSE]\n", response)
+
+    try:
+        # 🔥 CLEAN RESPONSE FIRST
+        cleaned = extract_json(response)
+
+        print("\n[CLEANED JSON]\n", cleaned)
+
+        data = json.loads(cleaned)
+
+        # 🔥 Normalize type
+        data["artifact_type"] = normalize_artifact_type(
+            data.get("artifact_type")
+        )
+
+        return data
+
+    except Exception as e:
+        print("\n[JSON ERROR]\n", str(e))
+
+        return {
+            "artifact_type": "unknown",
+            "name": "generated_script",
+            "script": response
+        }

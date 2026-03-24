@@ -1,8 +1,10 @@
 import sys
 import os
 
-# 🔥 FIX: Ensure project root is in PYTHONPATH (Render + local)
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+# 🔥 Ensure project root is in PYTHONPATH
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
 
 import streamlit as st
 
@@ -26,20 +28,18 @@ except:
         return ""
 
 
-# ---------------- UI CONFIG ----------------
-st.set_page_config(
-    page_title="AI ServiceNow Developer Agent",
-    layout="wide"
-)
+# ---------------- SESSION STATE ----------------
+if "artifact" not in st.session_state:
+    st.session_state.artifact = None
 
+
+# ---------------- UI ----------------
+st.set_page_config(page_title="AI ServiceNow Developer Agent", layout="wide")
 st.title("🚀 AI ServiceNow Developer Agent")
 
 
 # ---------------- INPUT ----------------
-requirement = st.text_area(
-    "Describe your ServiceNow requirement",
-    height=150
-)
+requirement = st.text_area("Describe your ServiceNow requirement", height=150)
 
 col1, col2 = st.columns(2)
 
@@ -50,12 +50,13 @@ with col1:
     )
 
 with col2:
-    provider = st.selectbox(
-        "LLM Provider",
-        ["openai", "gemini", "claude"],
-        index=["openai", "gemini", "claude"].index(settings.DEFAULT_PROVIDER)
-        if settings.DEFAULT_PROVIDER in ["openai", "gemini", "claude"] else 0
-    )
+    providers = ["openai", "gemini", "claude"]
+
+    default_index = 0
+    if settings.DEFAULT_PROVIDER in providers:
+        default_index = providers.index(settings.DEFAULT_PROVIDER)
+
+    provider = st.selectbox("LLM Provider", providers, index=default_index)
 
 
 # ---------------- GENERATE ----------------
@@ -66,12 +67,9 @@ if st.button("Generate Script"):
         st.stop()
 
     with st.spinner("Generating script..."):
-
         try:
-            # 🔍 RAG Context (safe fallback)
             context = retrieve_context(requirement)
 
-            # 🤖 Generate script
             artifact = generate_script(
                 requirement=requirement,
                 provider=provider,
@@ -79,43 +77,73 @@ if st.button("Generate Script"):
                 artifact_hint=artifact_type
             )
 
-            st.success("Script Generated")
-
-            # ---------------- DISPLAY ----------------
-            st.subheader("Artifact Type")
-            st.code(artifact.get("artifact_type", ""))
-
-            st.subheader("Name")
-            st.code(artifact.get("name", ""))
-
-            st.subheader("Generated Script")
-            st.code(artifact.get("script", ""), language="javascript")
-
-            # ---------------- VALIDATION ----------------
-            validation = validate_script(artifact)
-
-            if validation.get("valid"):
-                st.success("Validation Passed")
-            else:
-                st.warning("Validation Issues Found")
-                for issue in validation.get("issues", []):
-                    st.write(f"- {issue}")
-
-            # ---------------- DEPLOY ----------------
-            if st.button("Deploy to ServiceNow"):
-
-                with st.spinner("Deploying to ServiceNow..."):
-                    try:
-                        result = deploy_artifact(artifact)
-
-                        st.success("Deployment Response")
-                        st.json(result)
-
-                    except Exception as e:
-                        st.error(f"Deployment failed: {str(e)}")
+            st.session_state.artifact = artifact
 
         except Exception as e:
             st.error(f"Script generation failed: {str(e)}")
+
+
+# ---------------- DISPLAY ----------------
+artifact = st.session_state.artifact
+
+if artifact:
+
+    st.success("Script Generated")
+
+    # Normalize display
+    artifact_type_display = artifact.get("artifact_type", "").lower()
+
+    st.subheader("Artifact Type")
+    st.code(artifact_type_display)
+
+    st.subheader("Name")
+    st.code(artifact.get("name", ""))
+
+    # ---------------- SCRIPT FORMAT FIX ----------------
+    st.subheader("Generated Script")
+
+    script = artifact.get("script", "")
+
+    if isinstance(script, str):
+        script = script.replace("\\n", "\n").replace("\\t", "\t")
+
+    st.code(script, language="javascript")
+
+    # ---------------- VALIDATION FIX ----------------
+    validation = validate_script(artifact)
+
+    if isinstance(validation, list):
+        validation = {
+            "valid": len(validation) == 0,
+            "issues": validation
+        }
+    elif not isinstance(validation, dict):
+        validation = {
+            "valid": True,
+            "issues": []
+        }
+
+    if validation.get("valid"):
+        st.success("Validation Passed")
+    else:
+        st.warning("Validation Issues Found")
+        for issue in validation.get("issues", []):
+            st.write(f"- {issue}")
+
+    # ---------------- DEPLOY ----------------
+    st.markdown("### 🚀 Deploy")
+
+    if st.button("Deploy to ServiceNow"):
+
+        with st.spinner("Deploying..."):
+            try:
+                result = deploy_artifact(artifact)
+
+                st.success("Deployment Successful")
+                st.json(result)
+
+            except Exception as e:
+                st.error(f"Deployment failed: {str(e)}")
 
 
 # ---------------- FOOTER ----------------
