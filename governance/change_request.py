@@ -1,11 +1,16 @@
 import requests
-from integration.servicenow_client import _headers
+from integration.servicenow_client import get_headers
 from config.settings import settings
 
 
 def create_change_request(description):
 
-    url = f"{settings.SN_INSTANCE}/api/now/table/change_request"
+    instance = (settings.SN_INSTANCE or "").rstrip("/")
+
+    if not instance:
+        raise ValueError("SN_INSTANCE is not configured")
+
+    url = f"{instance}/api/now/table/change_request"
 
     body = {
         "short_description": description,
@@ -13,6 +18,6 @@ def create_change_request(description):
         "category": "software"
     }
 
-    r = requests.post(url, headers=_headers(), json=body)
+    r = requests.post(url, headers=get_headers(), json=body)
 
     return r.json()

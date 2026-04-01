@@ -10,16 +10,24 @@ def parse_keys(key_string):
     return [k.strip() for k in key_string.split(",") if k.strip()]
 
 
+def getenv_any(*names, default=None):
+    for name in names:
+        value = os.getenv(name)
+        if value:
+            return value
+    return default
+
+
 class Settings:
 
     def __init__(self):
 
         # 🔥 MULTI-KEY SUPPORT
-        self.OPENAI_API_KEYS = parse_keys(os.getenv("OPENAI_API_KEYS"))
-        self.GEMINI_API_KEYS = parse_keys(os.getenv("GEMINI_API_KEYS"))
-        self.CLAUDE_API_KEYS = parse_keys(os.getenv("CLAUDE_API_KEYS"))
+        self.OPENAI_API_KEYS = parse_keys(getenv_any("OPENAI_API_KEYS", "OPENAI_KEYS"))
+        self.GEMINI_API_KEYS = parse_keys(getenv_any("GEMINI_API_KEYS", "GEMINI_KEYS"))
+        self.CLAUDE_API_KEYS = parse_keys(getenv_any("CLAUDE_API_KEYS", "CLAUDE_KEYS"))
 
-        self.DEFAULT_PROVIDER = os.getenv("DEFAULT_PROVIDER", "gemini")
+        self.DEFAULT_PROVIDER = getenv_any("DEFAULT_PROVIDER", "DEFAULT_MODEL_PROVIDER", default="gemini")
 
         # 🔥 ServiceNow
         self.SN_INSTANCE = os.getenv("SN_INSTANCE")
@@ -43,8 +51,11 @@ class Settings:
         if not self.SN_INSTANCE:
             print("⚠️ SN_INSTANCE not set (deploy will fail)")
 
+        if not self.SN_CLIENT_ID or not self.SN_CLIENT_SECRET:
+            print("⚠️ SN client credentials missing (deploy will fail)")
+
         if not self.SN_USERNAME or not self.SN_PASSWORD:
-            print("⚠️ SN credentials missing (deploy disabled)")
+            print("⚠️ SN username/password missing (not used by current deploy flow)")
 
 
 settings = Settings()

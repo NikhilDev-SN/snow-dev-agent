@@ -44,7 +44,7 @@ requirement = st.text_area("Describe your ServiceNow requirement", height=150)
 col1, col2 = st.columns(2)
 
 with col1:
-    artifact_type = st.selectbox(
+    selected_artifact_type = st.selectbox(
         "Artifact Type",
         ["auto", "business_rule", "script_include", "client_script"]
     )
@@ -74,8 +74,13 @@ if st.button("Generate Script"):
                 requirement=requirement,
                 provider=provider,
                 context=context,
-                artifact_hint=artifact_type
+                artifact_hint=selected_artifact_type,
             )
+
+            artifact["requested_artifact_type"] = selected_artifact_type
+
+            if selected_artifact_type != "auto":
+                artifact["artifact_type"] = selected_artifact_type
 
             st.session_state.artifact = artifact
 
@@ -99,6 +104,10 @@ if artifact:
     st.subheader("Name")
     st.code(artifact.get("name", ""))
 
+    if artifact.get("table"):
+        st.subheader("Table")
+        st.code(artifact.get("table", ""))
+
     # ---------------- SCRIPT FORMAT FIX ----------------
     st.subheader("Generated Script")
 
@@ -110,7 +119,7 @@ if artifact:
     st.code(script, language="javascript")
 
     # ---------------- VALIDATION FIX ----------------
-    validation = validate_script(artifact)
+    validation = validate_script(script)
 
     if isinstance(validation, list):
         validation = {
@@ -144,6 +153,7 @@ if artifact:
 
             except Exception as e:
                 st.error(f"Deployment failed: {str(e)}")
+                st.caption("Sanitized details were written to logs/deployment_debug.txt")
 
 
 # ---------------- FOOTER ----------------
